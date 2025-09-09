@@ -1,13 +1,29 @@
+# gyökér
 /.well-known/
-/api/*
-/api/gueue/*
-/api/uploads/*
-/api/uploads/leletek/*
 /vendor/
 error_log
-# De ne zárja ki a .htaccess-t
+
+# API teljesen tiltva, KIVÉTELEK:
+# (Előbb engedélyezd a mappát, utána a fájlokat.)
+/api/*
 !/api/.htaccess
-!/api/uploads/.htaccess
-!/api/uploads/leletek/.htaccess
-!/api/.htaccess
-!.htaccess
+!/api/upload_lelet.php
+
+# uploads mappa: a mappát engedélyezzük, de alapból minden benne lévőt tiltunk,
+# majd engedélyezzük a szükséges .htaccess-eket.
+/api/uploads/
+ /api/uploads/*
+ !/api/uploads/.htaccess
+
+# uploads/leletek almappa: ugyanaz a minta
+ /api/uploads/leletek/
+  /api/uploads/leletek/*
+  !/api/uploads/leletek/.htaccess
+
+# queue mappa: (FIGYELEM: helyes név!)
+/api/queue/
+ /api/queue/*
+ !/api/queue/.htaccess
+
+# Globális .htaccess engedélyezés (ha a gyökérben is használsz)
+/.htaccess
