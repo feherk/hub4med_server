@@ -82,6 +82,52 @@ function downscale_if_needed(string $path, int $maxSide=3000): void {
   }
 }
 
+/**
+ * Többfájlos $_FILES normalizálása: egységes listát ad vissza.
+ * Minden elem: ['field','name','type','tmp_name','error','size']
+ */
+function collect_uploaded_files(): array {
+  $out = [];
+  foreach ($_FILES as $field => $info) {
+    if (is_array($info['tmp_name'])) {
+      $n = count($info['tmp_name']);
+      for ($i = 0; $i < $n; $i++) {
+        $tmp = $info['tmp_name'][$i] ?? '';
+        if ($tmp === '' || !is_uploaded_file($tmp)) continue;
+        $out[] = [
+          'field'    => $field,
+          'name'     => (string)($info['name'][$i] ?? ''),
+          'type'     => (string)($info['type'][$i] ?? ''),
+          'tmp_name' => (string)$tmp,
+          'error'    => (int)($info['error'][$i] ?? UPLOAD_ERR_OK),
+          'size'     => (int)($info['size'][$i] ?? 0),
+        ];
+      }
+    } else {
+      $tmp = $info['tmp_name'] ?? '';
+      if ($tmp === '' || !is_uploaded_file($tmp)) continue;
+      $out[] = [
+        'field'    => $field,
+        'name'     => (string)($info['name'] ?? ''),
+        'type'     => (string)($info['type'] ?? ''),
+        'tmp_name' => (string)$tmp,
+        'error'    => (int)($info['error'] ?? UPLOAD_ERR_OK),
+        'size'     => (int)($info['size'] ?? 0),
+      ];
+    }
+  }
+  return $out;
+}
+
+/**
+ * Egyedi ujjlenyomat generálása a feltöltött tmp fájlból (tartalom hash + méret).
+ * Duplikátumok kiszűrésére használjuk.
+ */
+function file_fingerprint(string $tmp, int $size): string {
+  $h = @hash_file('sha1', $tmp) ?: (string)mt_rand();
+  return $h . ':' . (string)$size;
+}
+
 // ---- only POST ----
 if ($_SERVER['REQUEST_METHOD'] !== 'POST') {
   header('Allow: POST, OPTIONS');
@@ -113,67 +159,104 @@ $post_id = isset($_POST['post_id']) ? trim((string)$_POST['post_id']) : '';
 if ($post_id === '' || !ctype_digit($post_id)) jerr(400, 'Hiányzó vagy érvénytelen post_id');
 $item_id = isset($_POST['item_id']) ? trim((string)$_POST['item_id']) : '';
 
-// első feltöltött fájl
-$fileInfo = null; $fieldName = null;
-foreach ($_FILES as $k=>$info) { if (!empty($info['tmp_name'])) { $fileInfo = $info; $fieldName = $k; break; } }
-if (!$fileInfo) jerr(400, 'Nem érkezett fájl');
-
-if (!empty($fileInfo['error']) && $fileInfo['error'] !== UPLOAD_ERR_OK) jerr(400, 'Feltöltési hiba ('.$fileInfo['error'].')');
-if ($fileInfo['size'] > MAX_MB*1024*1024) jerr(413, 'Túl nagy fájl (max '.MAX_MB.' MB)');
-
-$mime = detect_mime($fileInfo['tmp_name']);
-if (!in_array($mime, $ALLOWED_MIME, true)) jerr(400, 'Nem engedélyezett MIME: '.$mime);
-
-$ext = ext_from_name($fileInfo['name']);
-if (!in_array($ext, $ALLOWED_EXT, true)) {
-  $ext = ($mime==='image/png') ? 'png' : (($mime==='image/jpeg') ? 'jpg' : '');
-  if ($ext === '') jerr(400, 'Nem támogatott kiterjesztés');
+// --- Többfájlos feltöltés támogatása ---
+$files = collect_uploaded_files();
+if (!$files) jerr(400, 'Nem érkezett fájl');
+// Duplikátumok kiszűrése (ugyanaz a fájl több kulcs alatt érkezhet)
+$seen = [];
+$unique = [];
+foreach ($files as $fi) {
+  $fp = file_fingerprint($fi['tmp_name'], (int)$fi['size']);
+  if (isset($seen[$fp])) continue;
+  $seen[$fp] = true;
+  $unique[] = $fi;
 }
+$files = $unique;
 
 if (!ensure_dir($UPLOAD_BASE)) jerr(500, 'Célmappa nem hozható létre');
 if (!ensure_dir($QUEUE_DIR))   jerr(500, 'Queue mappa nem hozható létre');
 
-$targetRel = $post_id . '.' . $ext;
-$targetAbs = rtrim($UPLOAD_BASE,'/').'/'.$targetRel;
+$processed = [];
+$jobs      = [];
+$seq       = 0;
 
-if (!@move_uploaded_file($fileInfo['tmp_name'], $targetAbs)) jerr(500, 'Mentés sikertelen');
+foreach ($files as $fi) {
+  if (!empty($fi['error']) && $fi['error'] !== UPLOAD_ERR_OK) {
+    jerr(400, 'Feltöltési hiba ('.$fi['error'].')');
+  }
+  if ($fi['size'] > MAX_MB*1024*1024) {
+    jerr(413, 'Túl nagy fájl (max '.MAX_MB.' MB)');
+  }
 
-// EXIF autorotate + downscale
-@exif_autorotate($targetAbs);
-@downscale_if_needed($targetAbs, 3000);
+  $mime = detect_mime($fi['tmp_name']);
+  if (!in_array($mime, $ALLOWED_MIME, true)) {
+    jerr(400, 'Nem engedélyezett MIME: '.$mime);
+  }
 
-@chmod($targetAbs, 0644);
-$sha = @hash_file('sha256', $targetAbs) ?: null;
+  $ext = ext_from_name($fi['name']);
+  if (!in_array($ext, $ALLOWED_EXT, true)) {
+    $ext = ($mime==='image/png') ? 'png' : (($mime==='image/jpeg') ? 'jpg' : '');
+    if ($ext === '') jerr(400, 'Nem támogatott kiterjesztés');
+  }
 
-// job JSON queue-ba
-$job = [
-  'type'       => 'process_lelet',
-  'post_id'    => (int)$post_id,
-  'item_id'    => $item_id,
-  'path_rel'   => 'uploads/leletek/'.$targetRel,
-  'mime'       => $mime,
-  'size'       => (int)$fileInfo['size'],
-  'sha256'     => $sha,
-  'created_at' => gmdate('c'),
-];
-$jobId   = $post_id . '-' . gmdate('Ymd\THis\Z');
-$jobFile = rtrim($QUEUE_DIR,'/').'/'.$jobId.'.json';
-if (@file_put_contents($jobFile, json_encode($job, JSON_UNESCAPED_UNICODE|JSON_UNESCAPED_SLASHES)) === false) {
-  jerr(500, 'Job írása sikertelen');
-}
-@chmod($jobFile, 0644);
+  $orig = basename((string)$fi['name']);
+  $seq++;
+  $safeBase = preg_replace('/[^A-Za-z0-9._-]/', '_', $orig !== '' ? $orig : ('lelet_'.$seq.'.'.$ext));
+  // biztosítsuk a helyes kiterjesztést
+  if (strtolower(pathinfo($safeBase, PATHINFO_EXTENSION)) !== $ext) {
+    $safeBase = preg_replace('/\\.[^.]*$/', '', $safeBase) . '.' . $ext;
+  }
+  // egyedi prefix a post_id-val, ha még nincs
+  if (strpos($safeBase, $post_id.'_') !== 0) {
+    $safeBase = $post_id . '_' . $safeBase;
+  }
+  $targetRel = $safeBase;
+  $targetAbs = rtrim($UPLOAD_BASE,'/').'/'.$targetRel;
 
-// válasz
-jins([
-  'file' => [
+  if (!@move_uploaded_file($fi['tmp_name'], $targetAbs)) {
+    jerr(500, 'Mentés sikertelen');
+  }
+
+  // EXIF autorotate + downscale
+  @exif_autorotate($targetAbs);
+  @downscale_if_needed($targetAbs, 3000);
+
+  @chmod($targetAbs, 0644);
+  $sha = @hash_file('sha256', $targetAbs) ?: null;
+
+  // job JSON queue-ba
+  $job = [
+    'type'       => 'process_lelet',
+    'post_id'    => (int)$post_id,
+    'item_id'    => $item_id,
+    'path_rel'   => 'uploads/leletek/'.$targetRel,
+    'mime'       => $mime,
+    'size'       => (int)$fi['size'],
+    'sha256'     => $sha,
+    'created_at' => gmdate('c'),
+  ];
+  $jobId   = $post_id . '-' . gmdate('Ymd\THis\Z') . '-' . $seq;
+  $jobFile = rtrim($QUEUE_DIR,'/').'/'.$jobId.'.json';
+  if (@file_put_contents($jobFile, json_encode($job, JSON_UNESCAPED_UNICODE|JSON_UNESCAPED_SLASHES)) === false) {
+    jerr(500, 'Job írása sikertelen');
+  }
+  @chmod($jobFile, 0644);
+
+  $processed[] = [
     'rel'    => $job['path_rel'],
     'mime'   => $mime,
-    'size'   => (int)$fileInfo['size'],
+    'size'   => (int)$fi['size'],
     'sha256' => $sha
-  ],
-  'job' => [
+  ];
+  $jobs[] = [
     'queued'  => true,
     'id'      => $jobId,
     'item_id' => $item_id
-  ]
+  ];
+}
+
+// válasz: több fájl/jobb
+jins([
+  'files' => $processed,
+  'jobs'  => $jobs
 ]);
