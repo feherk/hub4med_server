@@ -1,0 +1,13 @@
+/.well-known/
+/api/*
+/api/gueue/*
+/api/uploads/*
+/api/uploads/leletek/*
+/vendor/
+error_log
+# De ne zárja ki a .htaccess-t
+!/api/.htaccess
+!/api/uploads/.htaccess
+!/api/uploads/leletek/.htaccess
+!/api/.htaccess
+!.htaccess

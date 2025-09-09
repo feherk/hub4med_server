@@ -1,0 +1,29 @@
+# Könyvtárlistázás tiltása
+Options -Indexes
+
+# Alap biztonsági fejlécek
+<IfModule mod_headers.c>
+  Header set X-Content-Type-Options "nosniff"
+  Header set X-Frame-Options "SAMEORIGIN"
+  Header set X-XSS-Protection "1; mode=block"
+  Header set Referrer-Policy "no-referrer-when-downgrade"
+</IfModule>
+
+# .htaccess és egyéb érzékeny fájlok tiltása
+<FilesMatch "^(\\.ht|config|composer|package|README|LICENSE)">
+  Require all denied
+</FilesMatch>
+
+# Csak PHP-t engedjünk (queue, uploads JSON ne legyen közvetlenül elérhető)
+<FilesMatch "\\.(json|log|txt|md|yaml|yml|ini|bak|old)$">
+  Require all denied
+</FilesMatch>
+
+# Csak PHP futtatható, minden más statikus fájlt tagadunk
+<FilesMatch "\\.(php)$">
+  Require all granted
+</FilesMatch>
+
+# Ha valaki direkt a könyvtárat nyitja meg -> 403
+DirectoryIndex disabled
+ErrorDocument 403 "Hozzáférés megtagadva"

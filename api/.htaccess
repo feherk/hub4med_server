@@ -1,0 +1,18 @@
+# /api/.htaccess – upload_lelet.php védelme
+<Files "upload_lelet.php">
+  # Preflight-ot engedjük át (CORS)
+  <If "%{REQUEST_METHOD} == 'OPTIONS'">
+    Require all granted
+  </If>
+  <Else>
+    # Authorization fejléchez env flag (Apache 2.4)
+    SetEnvIfNoCase Authorization "^Bearer\\s+.+$" has_bearer=1
+    # (opcionális) továbbítsuk a PHP felé is
+    SetEnvIf Authorization "^(.*)$" HTTP_AUTHORIZATION=$1
+
+    <RequireAny>
+      Require env has_bearer
+      Require expr "%{QUERY_STRING} =~ /(^|&)token=[^&]+/"
+    </RequireAny>
+  </Else>
+</Files>
