@@ -1,0 +1,6 @@
+# api/queue/.htaccess
+# Minden hozzáférés tiltása
+Require all denied
+
+# Ha valaki mégis próbálkozik, 403-at kapjon
+ErrorDocument 403 "Hozzáférés megtagadva"
