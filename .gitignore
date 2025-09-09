@@ -3,27 +3,30 @@
 /vendor/
 error_log
 
-# API teljesen tiltva, KIVÉTELEK:
-# (Előbb engedélyezd a mappát, utána a fájlokat.)
+# API: mindent kizárunk...
 /api/*
+
+# ...de magát a /api mappát visszaengedjük, hogy lehessen benne kivételt tenni
+!/api/
+
+# /api gyökérben ezek kellenek
 !/api/.htaccess
 !/api/upload_lelet.php
 
-# uploads mappa: a mappát engedélyezzük, de alapból minden benne lévőt tiltunk,
-# majd engedélyezzük a szükséges .htaccess-eket.
-/api/uploads/
- /api/uploads/*
- !/api/uploads/.htaccess
+# uploads: csak a .htaccess kell
+/api/uploads/*
+!/api/uploads/
+!/api/uploads/.htaccess
 
-# uploads/leletek almappa: ugyanaz a minta
- /api/uploads/leletek/
-  /api/uploads/leletek/*
-  !/api/uploads/leletek/.htaccess
+# uploads/leletek: csak a .htaccess kell
+/api/uploads/leletek/*
+!/api/uploads/leletek/
+!/api/uploads/leletek/.htaccess
 
-# queue mappa: (FIGYELEM: helyes név!)
-/api/queue/
- /api/queue/*
- !/api/queue/.htaccess
+# queue: csak a .htaccess kell
+/api/queue/*
+!/api/queue/
+!/api/queue/.htaccess
 
-# Globális .htaccess engedélyezés (ha a gyökérben is használsz)
+# gyökér .htaccess
 /.htaccess
