@@ -17,8 +17,8 @@ define('MAX_MB', 10);
 $BASE        = __DIR__;
 $UPLOAD_BASE = $BASE . '/uploads/leletek'; // végleges hely
 $QUEUE_DIR   = $BASE . '/queue';           // feldolgozási sor (JSON jobok)
-$ALLOWED_EXT  = ['jpg','jpeg','png'];
-$ALLOWED_MIME = ['image/jpeg','image/png'];
+$ALLOWED_EXT  = ['jpg','jpeg','png','pdf'];
+$ALLOWED_MIME = ['image/jpeg','image/png','application/pdf'];
 
 // ---- util ----
 function jerr(int $code, string $msg, array $extra=[]): void {
@@ -173,6 +173,9 @@ foreach ($files as $fi) {
 }
 $files = $unique;
 
+// Egyedi batch azonosító az aktuális feltöltési híváshoz (időbélyeg + véletlen)
+$uploadBatchTag = gmdate('YmdHis') . '-' . substr(bin2hex(random_bytes(3)), 0, 6);
+
 if (!ensure_dir($UPLOAD_BASE)) jerr(500, 'Célmappa nem hozható létre');
 if (!ensure_dir($QUEUE_DIR))   jerr(500, 'Queue mappa nem hozható létre');
 
@@ -195,22 +198,23 @@ foreach ($files as $fi) {
 
   $ext = ext_from_name($fi['name']);
   if (!in_array($ext, $ALLOWED_EXT, true)) {
-    $ext = ($mime==='image/png') ? 'png' : (($mime==='image/jpeg') ? 'jpg' : '');
+    if     ($mime === 'image/png')  { $ext = 'png'; }
+    elseif ($mime === 'image/jpeg') { $ext = 'jpg'; }
+    elseif ($mime === 'application/pdf') { $ext = 'pdf'; }
+    else { $ext = ''; }
     if ($ext === '') jerr(400, 'Nem támogatott kiterjesztés');
   }
 
   $orig = basename((string)$fi['name']);
   $seq++;
-  $safeBase = preg_replace('/[^A-Za-z0-9._-]/', '_', $orig !== '' ? $orig : ('lelet_'.$seq.'.'.$ext));
-  // biztosítsuk a helyes kiterjesztést
-  if (strtolower(pathinfo($safeBase, PATHINFO_EXTENSION)) !== $ext) {
-    $safeBase = preg_replace('/\\.[^.]*$/', '', $safeBase) . '.' . $ext;
+  // Alap név tisztítása + kiterjesztés egységesítése
+  $base = preg_replace('/[^A-Za-z0-9._-]/', '_', $orig !== '' ? $orig : ('lelet_'.$seq.'.'.$ext));
+  if (strtolower(pathinfo($base, PATHINFO_EXTENSION)) !== $ext) {
+    $base = preg_replace('/\\.[^.]*$/', '', $base) . '.' . $ext;
   }
-  // egyedi prefix a post_id-val, ha még nincs
-  if (strpos($safeBase, $post_id.'_') !== 0) {
-    $safeBase = $post_id . '_' . $safeBase;
-  }
-  $targetRel = $safeBase;
+  // Végső célfájlnév: post_id + batchTag + sorszám + eredeti név
+  // Pl.: 17_20250909T135501Z-1a2b3c_1_17_1.jpg  (emberi olvashatóság + ütközésvédelem)
+  $targetRel = $post_id . '_' . $uploadBatchTag . '_' . $seq . '_' . $base;
   $targetAbs = rtrim($UPLOAD_BASE,'/').'/'.$targetRel;
 
   if (!@move_uploaded_file($fi['tmp_name'], $targetAbs)) {
