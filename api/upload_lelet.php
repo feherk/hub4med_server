@@ -233,6 +233,8 @@ foreach ($files as $fi) {
     'type'       => 'process_lelet',
     'post_id'    => (int)$post_id,
     'item_id'    => $item_id,
+    'bundle_id'  => $post_id . '-' . $uploadBatchTag, // csomag azonosító (egy beküldés = egy csomag)
+    'page_no'    => (int)$seq,                        // oldalszám a csomagon belül
     'path_rel'   => 'uploads/leletek/'.$targetRel,
     'mime'       => $mime,
     'size'       => (int)$fi['size'],
@@ -261,6 +263,7 @@ foreach ($files as $fi) {
 
 // válasz: több fájl/jobb
 jins([
-  'files' => $processed,
-  'jobs'  => $jobs
+  'bundle_id' => $post_id . '-' . $uploadBatchTag,
+  'files'     => $processed,
+  'jobs'      => $jobs
 ]);
